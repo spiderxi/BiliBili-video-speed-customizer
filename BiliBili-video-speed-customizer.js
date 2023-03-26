@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BiliBili video speed customizer
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      0.2
 // @description  B站视频倍速自定义
 // @author       https://github.com/spiderxi
 // @match        *://*.bilibili.com/video/*
@@ -14,41 +14,56 @@
 (function() {
     'use strict';
     let config = {
-        controlPanel: "//*[@id=\"bilibili-player\"]/div/div/div[1]/div[1]/div[10]/div[2]/div[2]/div[3]",
-        rateDelta: 0.01,//一次滚动视频速度变量量
-        minRate:  0.3,//最小速度
-        maxRate: 5,//最大速度
-        speedKey: "BVSC:speed",
-        defaultSpeed: 1.0//默认速度
+        //多集视频 倍速按钮
+        speedBtnMulti: "//*[@id=\"bilibili-player\"]/div/div/div[1]/div[1]/div[10]/div[2]/div[2]/div[3]/div[3]/div",
+        //单集视频倍速按钮
+        speedBtnSingle: "//*[@id=\"bilibili-player\"]/div/div/div[1]/div[1]/div[10]/div[2]/div[2]/div[3]/div[2]/div",
+        //右下角控制面板
+        right: "//*[@id=\"bilibili-player\"]/div/div/div[1]/div[1]/div[10]/div[2]/div[2]/div[3]",
+        //视频
+        video: "//*[@id=\"bilibili-player\"]/div/div/div[1]/div[1]/div[1]/div/video",
+        //一次滚动视频速度变量
+        rateDelta: 0.01,
+        //最小速度
+        minSpeed:  0.3,
+        //最大速度
+        maxSpeed: 5,
+        //默认速度
+        defaultSpeed: 1.0,
+        speedKey: "BVSC:speed"
     }
     let application = {
+        //倍速按钮
         btn: null,
-        curRate: config.defaultSpeed,
-        isHovered: false
+        //当前播放速度
+        curSpeed: config.defaultSpeed,
+        //鼠标是否处于倍速按钮上
+        isHovered: false,
+        //视频源
+        videoSrc: null
     }
-    let setRate = function (rate) {
-        if (application.btn === null) throw new Error("倍速按钮获取失败")
-        if (rate == null || rate < config.minRate || rate > config.maxRate) return
-        rate = Number(rate.toFixed(2))
-        GM_setValue(config.speedKey, rate)
-        application.btn.textContent = String(rate)
-        application.curRate = rate
-        document.querySelector('video').playbackRate = rate
+    let setSpeed = function (speed) {
+        if (speed == null || speed < config.minSpeed || speed > config.maxSpeed) return
+        speed = Number(speed.toFixed(2))
+        GM_setValue(config.speedKey, speed)
+        document.querySelector('video').playbackRate = speed
+        application.curSpeed = speed
+        if (application.btn !== null) application.btn.textContent = String(speed)
     }
     let getElementByXpath = function (xpath, root) {
         return document.evaluate(xpath, root || document).iterateNext()
     }
-    let videoOnLoadEvent = function () {
-        if (this.childNodes.length === 3){
-            let wrapper = this.childNodes.item(2)
-            if (wrapper.childNodes.length !== 5) { // 右下角菜单没有选集
-                wrapper = this.childNodes.item(1)
-            }
-            let btn = wrapper.childNodes.item(1)
-            let rateList = wrapper.childNodes.item(3)
-            wrapper.removeChild(rateList)
+    let whenRightLoad = function () {
+        if (getElementByXpath(config.speedBtnMulti) != null && getElementByXpath(config.speedBtnSingle) !== null){
+            let btnMulti = getElementByXpath(config.speedBtnMulti)
+            let btnSingle = getElementByXpath(config.speedBtnSingle)
+            let btn = null;
+            if (btnMulti.textContent === "倍速") btn = btnMulti
+            else btn = btnSingle
+            let btnContainer = btn.parentElement;
+            btnContainer.removeChild(btnContainer.childNodes.item(3))
             application.btn = btn
-            setRate(application.curRate)
+            setSpeed(application.curSpeed)
             btn.addEventListener("mouseenter", ()=>{
                 application.isHovered = true;
             })
@@ -56,21 +71,30 @@
                 application.isHovered = false;
             })
             btn.addEventListener("click", ()=>{
-                setRate(config.defaultSpeed)
+                setSpeed(config.defaultSpeed)
             })
             window.addEventListener("wheel", (e)=>{
                 if (application.isHovered) {
-                    setRate(application.curRate + (e.deltaY < 0 ? config.rateDelta: -config.rateDelta))
+                    setSpeed(application.curSpeed + (e.deltaY < 0 ? config.rateDelta: -config.rateDelta))
                     e.preventDefault()
                 }
             }, {passive: false})
-            this.removeEventListener("DOMNodeInserted", videoOnLoadEvent)
+            this.removeEventListener("DOMNodeInserted", whenRightLoad)
         }
     }
     let init = function () {
-        let panel = getElementByXpath(config.controlPanel)
-        panel.addEventListener("DOMNodeInserted", videoOnLoadEvent)
-        application.curRate = (GM_getValue(config.speedKey) || config.defaultSpeed)
+        application.curSpeed = (GM_getValue(config.speedKey) || config.defaultSpeed)
+        let right = getElementByXpath(config.right)
+        //right静态加载, 但right子元素动态加载, 获取子元素需要监听right的更新事件
+        right.addEventListener("DOMNodeInserted", whenRightLoad)
+        //当切换视频时, 重新设置播放速度
+        let video = getElementByXpath(config.video)
+        let observer = new MutationObserver(mutations => {
+            if (video.src != "") {
+                setSpeed(application.curSpeed)
+            }
+        })
+        observer.observe(video, {attributes: true, attributeFilter: ["src"]})
     }
     init()
 })();
